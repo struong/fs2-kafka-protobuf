@@ -1,0 +1,83 @@
+package com.struong
+
+import cats.effect.{IO, IOApp}
+import com.struong.addressbook.Person
+import com.typesafe.scalalogging.StrictLogging
+import fs2.kafka._
+import fs2.Stream
+import org.apache.kafka.clients.admin.NewTopic
+import org.apache.kafka.common.errors.TopicExistsException
+
+import scala.concurrent.duration._
+
+object Main extends IOApp.Simple with StrictLogging {
+  def run: IO[Unit] = {
+    def processRecord(record: ConsumerRecord[String, Array[Byte]]): IO[Unit] = {
+      val person = Person.parseFrom(record.value)
+      IO(println(s"Processing person: $person"))
+    }
+
+    val consumerSettings =
+      ConsumerSettings[IO, String, Array[Byte]]
+        .withAutoOffsetReset(AutoOffsetReset.Earliest)
+        .withBootstrapServers("localhost:9092")
+        .withGroupId("group")
+
+    val producerSettings =
+      ProducerSettings[IO, String, Array[Byte]]
+        .withBootstrapServers("localhost:9092")
+
+    def createTopic: IO[String] = {
+      val adminClientSettings: AdminClientSettings = AdminClientSettings(
+        "localhost:9092"
+      )
+
+      KafkaAdminClient.resource[IO](adminClientSettings).use {
+        _.createTopic(new NewTopic("topic", 1, 1.toShort))
+          .recoverWith { case _: TopicExistsException =>
+            IO(println(s"Topic already exists"))
+          }
+          .as("topic")
+      }
+    }
+
+    val protoPersonEvents = List(
+      Person("Alice", 42, Some("alice@test.com")),
+      Person("Bob", 55, Some("bob@test.com")),
+      Person("Mallory", 77)
+    )
+
+    def producePersonProtoEvents: Stream[IO, Unit] = {
+      KafkaProducer
+        .stream(producerSettings)
+        .flatMap { producer =>
+          Stream
+            .emits(protoPersonEvents)
+            .evalTap(p => IO(println(s"Producing person: $p")))
+            .evalMap(p =>
+              producer
+                .produceOne_("topic", "key", p.toByteArray)
+                .flatten
+                .void
+            )
+            .metered(1.seconds)
+        }
+    }
+
+   val stream =  for {
+      _ <- Stream.eval(createTopic)
+        _ <-  Stream.eval(producePersonProtoEvents.compile.drain)
+        _ <- KafkaConsumer
+          .stream(consumerSettings)
+          .subscribeTo("topic")
+          .records
+          .mapAsync(25) { committable =>
+            processRecord(committable.record)
+              .as(committable.offset)
+          }
+          .through(commitBatchWithin(1, 1.seconds))
+    } yield ()
+
+     stream.compile.drain
+  }
+}
