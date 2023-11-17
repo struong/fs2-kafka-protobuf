@@ -47,7 +47,7 @@ object Main extends IOApp.Simple with StrictLogging {
       Person("Mallory", 77)
     )
 
-    def producePersonProtoEvents: Stream[IO, Unit] = {
+    def producePersonProtoEvents: Stream[IO, Unit] =
       KafkaProducer
         .stream(producerSettings)
         .flatMap { producer =>
@@ -62,22 +62,23 @@ object Main extends IOApp.Simple with StrictLogging {
             )
             .metered(1.seconds)
         }
-    }
 
-   val stream =  for {
-      _ <- Stream.eval(createTopic)
-        _ <-  Stream.eval(producePersonProtoEvents.compile.drain)
-        _ <- KafkaConsumer
-          .stream(consumerSettings)
-          .subscribeTo("topic")
-          .records
-          .mapAsync(25) { committable =>
-            processRecord(committable.record)
-              .as(committable.offset)
-          }
-          .through(commitBatchWithin(1, 1.seconds))
-    } yield ()
+    def consumePersonEvents: Stream[IO, Unit] =
+      KafkaConsumer
+        .stream(consumerSettings)
+        .subscribeTo("topic")
+        .records
+        .mapAsync(25) { committable =>
+          processRecord(committable.record)
+            .as(committable.offset)
+        }
+        .through(commitBatchWithin(1, 1.seconds))
 
-     stream.compile.drain
+    val stream =
+      Stream.eval(createTopic) ++ producePersonProtoEvents.concurrently(
+        consumePersonEvents
+      )
+
+    stream.compile.drain
   }
 }
