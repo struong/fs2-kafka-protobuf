@@ -2,7 +2,6 @@ package com.struong
 
 import cats.effect.{IO, IOApp}
 import com.struong.addressbook.Person
-import com.typesafe.scalalogging.StrictLogging
 import fs2.kafka._
 import fs2.Stream
 import org.apache.kafka.clients.admin.NewTopic
@@ -10,7 +9,7 @@ import org.apache.kafka.common.errors.TopicExistsException
 
 import scala.concurrent.duration._
 
-object Main extends IOApp.Simple with StrictLogging {
+object Main extends IOApp.Simple {
   def run: IO[Unit] = {
     def processRecord(record: ConsumerRecord[String, Array[Byte]]): IO[Unit] = {
       val person = Person.parseFrom(record.value)
