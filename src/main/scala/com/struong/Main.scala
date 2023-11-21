@@ -26,7 +26,7 @@ object Main extends IOApp.Simple {
       ProducerSettings[IO, String, Array[Byte]]
         .withBootstrapServers("localhost:9092")
 
-    def createTopic: IO[String] = {
+    def createTopic: IO[Unit] = {
       val adminClientSettings: AdminClientSettings = AdminClientSettings(
         "localhost:9092"
       )
@@ -36,7 +36,6 @@ object Main extends IOApp.Simple {
           .recoverWith { case _: TopicExistsException =>
             IO(println(s"Topic already exists"))
           }
-          .as("topic")
       }
     }
 
